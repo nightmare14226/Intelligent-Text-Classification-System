@@ -1,0 +1,38 @@
+# Core Python Data Science
+numpy==2.2.2
+pandas==2.2.3
+scipy==1.15.1
+
+# Visualization
+matplotlib==3.10.0
+seaborn==0.13.2
+
+# Machine Learning
+scikit-learn==1.6.1
+
+# Deep Learning
+torch==2.6.0
+torchvision==0.21.0
+torchaudio==2.6.0
+
+# NLP and Transformers
+transformers==4.48.3
+datasets==3.2.0
+tokenizers==0.21.0
+
+# Training Utilities
+accelerate==1.3.0
+evaluate==0.4.3
+tqdm==4.67.1
+
+# Experiment Tracking
+tensorboard==2.18.0
+
+# Jupyter Development
+jupyter==1.1.1
+notebook==7.3.2
+ipykernel==6.29.5
+
+# Configuration and Utilities
+pyyaml==6.0.2
+requests==2.32.3
