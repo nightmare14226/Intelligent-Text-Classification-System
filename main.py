@@ -1,5 +1,7 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
+"""Project entry point."""
 
-print(torch.__version__)
+from train import main
+
+
+if __name__ == "__main__":
+    main()
