@@ -1,6 +1,5 @@
 """Fine-tune a Transformer classifier and report comparable metrics."""
 
-import copy
 import random
 import time
 from typing import Any
@@ -9,6 +8,7 @@ import numpy as np
 import torch
 from datasets import Dataset
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
@@ -74,9 +74,23 @@ def run_bert_experiment(
     learning_rate: float = 2e-5,
     max_length: int = 256,
     seed: int = 42,
+    tensorboard_log_dir: str | None = None,
+    log_every_steps: int = 10,
 ) -> tuple[dict[str, Any], list[int]]:
     _set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    writer = (
+        SummaryWriter(log_dir=tensorboard_log_dir)
+        if tensorboard_log_dir
+        else None
+    )
+    if writer:
+        writer.add_text("configuration/model", model_name)
+        writer.add_text("configuration/device", str(device))
+        writer.add_text("configuration/max_length", str(max_length))
+        writer.add_text("configuration/batch_size", str(batch_size))
+        writer.add_text("configuration/learning_rate", str(learning_rate))
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
@@ -100,6 +114,10 @@ def run_bert_experiment(
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name, num_labels=2
     ).to(device)
+
+    model = model.to(device)
+
+    criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     total_steps = epochs * len(train_loader)
     scheduler = get_linear_schedule_with_warmup(
@@ -112,6 +130,7 @@ def run_bert_experiment(
     best_f1 = -1.0
     best_state: dict[str, torch.Tensor] | None = None
     training_started = time.perf_counter()
+    global_step = 0
 
     for epoch in range(epochs):
         model.train()
@@ -126,15 +145,43 @@ def run_bert_experiment(
             optimizer.step()
             scheduler.step()
             total_loss += output.loss.item()
+            global_step += 1
+            if writer and (
+                global_step == 1 or global_step % log_every_steps == 0
+            ):
+                writer.add_scalar(
+                    "train/batch_loss", output.loss.item(), global_step
+                )
+                writer.add_scalar(
+                    "train/learning_rate",
+                    scheduler.get_last_lr()[0],
+                    global_step,
+                )
             progress.set_postfix(loss=f"{output.loss.item():.4f}")
 
         validation_metrics, _, _ = _evaluate(
             model, validation_loader, device
         )
+        epoch_number = epoch + 1
+        average_loss = total_loss / len(train_loader)
+        if writer:
+            writer.add_scalar("train/epoch_loss", average_loss, epoch_number)
+            for metric_name in (
+                "accuracy",
+                "precision_macro",
+                "recall_macro",
+                "f1_macro",
+            ):
+                writer.add_scalar(
+                    f"validation/{metric_name}",
+                    validation_metrics[metric_name],
+                    epoch_number,
+                )
+            writer.flush()
         history.append(
             {
-                "epoch": epoch + 1,
-                "training_loss": total_loss / len(train_loader),
+                "epoch": epoch_number,
+                "training_loss": average_loss,
                 "validation": validation_metrics,
             }
         )
@@ -153,6 +200,25 @@ def run_bert_experiment(
     test_metrics, test_predictions, inference_seconds = _evaluate(
         model, test_loader, device
     )
+    if writer:
+        for metric_name in (
+            "accuracy",
+            "precision_macro",
+            "recall_macro",
+            "f1_macro",
+        ):
+            writer.add_scalar(
+                f"test/{metric_name}", test_metrics[metric_name], global_step
+            )
+        writer.add_scalar(
+            "performance/training_seconds", training_seconds, global_step
+        )
+        writer.add_scalar(
+            "performance/inference_ms_per_sample",
+            1_000 * inference_seconds / len(test_data),
+            global_step,
+        )
+        writer.close()
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
     size_bytes = sum(
         parameter.numel() * parameter.element_size()
@@ -163,6 +229,7 @@ def run_bert_experiment(
         "model": model_name,
         "device": str(device),
         "epochs": epochs,
+        "tensorboard_log_dir": tensorboard_log_dir,
         "parameter_count": parameter_count,
         "model_size_mb": size_bytes / (1024**2),
         "training_seconds": training_seconds,
@@ -173,3 +240,14 @@ def run_bert_experiment(
         "history": history,
     }
     return results, test_predictions
+
+if __name__ == "__main__":
+    model_name = "distilbert-base-uncased"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_name, num_labels=2
+    ).to(device)
+
+    model = model.to(device)
+
+    print(model)

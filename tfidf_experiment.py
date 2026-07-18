@@ -8,6 +8,7 @@ from datasets import Dataset
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
+from torch.utils.tensorboard import SummaryWriter
 
 from evaluation import classification_metrics
 
@@ -17,6 +18,7 @@ def run_tfidf_experiment(
     validation_data: Dataset,
     test_data: Dataset,
     max_features: int = 50_000,
+    tensorboard_log_dir: str | None = None,
 ) -> tuple[dict[str, Any], list[int]]:
     pipeline = Pipeline(
         [
@@ -58,6 +60,7 @@ def run_tfidf_experiment(
 
     results = {
         "model": "TF-IDF + Logistic Regression",
+        "tensorboard_log_dir": tensorboard_log_dir,
         "training_seconds": training_seconds,
         "inference_seconds": inference_seconds,
         "milliseconds_per_sample": 1_000 * inference_seconds / len(test_data),
@@ -70,4 +73,29 @@ def run_tfidf_experiment(
         "most_positive_features": feature_names[positive_indices].tolist(),
         "most_negative_features": feature_names[negative_indices].tolist(),
     }
+    if tensorboard_log_dir:
+        writer = SummaryWriter(log_dir=tensorboard_log_dir)
+        writer.add_text("configuration/model", results["model"])
+        writer.add_text("configuration/max_features", str(max_features))
+        for split_name in ("validation", "test"):
+            for metric_name in (
+                "accuracy",
+                "precision_macro",
+                "recall_macro",
+                "f1_macro",
+            ):
+                writer.add_scalar(
+                    f"{split_name}/{metric_name}",
+                    results[split_name][metric_name],
+                    0,
+                )
+        writer.add_scalar(
+            "performance/training_seconds", training_seconds, 0
+        )
+        writer.add_scalar(
+            "performance/inference_ms_per_sample",
+            results["milliseconds_per_sample"],
+            0,
+        )
+        writer.close()
     return results, test_predictions.tolist()

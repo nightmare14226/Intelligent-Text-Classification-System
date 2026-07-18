@@ -10,6 +10,7 @@ from bert_experiment import run_bert_experiment
 from dataloader import DatasetSplits, load_imdb_splits
 from evaluation import save_results
 from tfidf_experiment import run_tfidf_experiment
+from visualization import create_result_dashboard
 
 
 def _optional_size(value: int) -> int | None:
@@ -34,6 +35,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=2e-5)
     parser.add_argument("--max-features", type=int, default=50_000)
     parser.add_argument("--output-dir", default="results")
+    parser.add_argument(
+        "--tensorboard-dir",
+        default=None,
+        help="TensorBoard log root (default: OUTPUT_DIR/tensorboard).",
+    )
+    parser.add_argument(
+        "--no-tensorboard",
+        action="store_true",
+        help="Disable TensorBoard event logging.",
+    )
+    parser.add_argument("--log-every-steps", type=int, default=10)
+    parser.add_argument(
+        "--no-show-plots",
+        action="store_true",
+        help="Save the result dashboard without opening its window.",
+    )
     return parser.parse_args()
 
 
@@ -99,6 +116,15 @@ def _print_summary(results: dict[str, Any]) -> None:
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir)
+    started_at = datetime.now(timezone.utc)
+    tensorboard_root = Path(
+        args.tensorboard_dir or output_dir / "tensorboard"
+    )
+    tensorboard_run_dir = (
+        None
+        if args.no_tensorboard
+        else tensorboard_root / started_at.strftime("%Y%m%d-%H%M%S")
+    )
     splits = load_imdb_splits(
         train_size=_optional_size(args.train_size),
         validation_size=_optional_size(args.validation_size),
@@ -106,9 +132,12 @@ def main() -> None:
         seed=args.seed,
     )
     results: dict[str, Any] = {
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": started_at.isoformat(),
         "dataset": "stanfordnlp/imdb",
         "seed": args.seed,
+        "tensorboard_run_dir": (
+            str(tensorboard_run_dir) if tensorboard_run_dir else None
+        ),
         "split_sizes": {
             "train": len(splits.train),
             "validation": len(splits.validation),
@@ -125,6 +154,11 @@ def main() -> None:
             splits.validation,
             splits.test,
             max_features=args.max_features,
+            tensorboard_log_dir=(
+                str(tensorboard_run_dir / "tfidf")
+                if tensorboard_run_dir
+                else None
+            ),
         )
         save_results(results, output_dir / "comparison.json")
 
@@ -140,6 +174,12 @@ def main() -> None:
             learning_rate=args.learning_rate,
             max_length=args.max_length,
             seed=args.seed,
+            tensorboard_log_dir=(
+                str(tensorboard_run_dir / "bert")
+                if tensorboard_run_dir
+                else None
+            ),
+            log_every_steps=max(1, args.log_every_steps),
         )
         save_results(results, output_dir / "comparison.json")
 
@@ -151,8 +191,19 @@ def main() -> None:
             output_dir / "error_analysis.csv",
         )
 
+    dashboard_path = create_result_dashboard(
+        results,
+        output_dir / "comparison_dashboard.png",
+        show=not args.no_show_plots,
+    )
     _print_summary(results)
     print(f"\nDetailed results saved to {output_dir / 'comparison.json'}")
+    print(f"Visual dashboard saved to {dashboard_path}")
+    if tensorboard_run_dir:
+        print(
+            "Open TensorBoard with:\n"
+            f'tensorboard --logdir "{tensorboard_root}"'
+        )
 
 
 if __name__ == "__main__":

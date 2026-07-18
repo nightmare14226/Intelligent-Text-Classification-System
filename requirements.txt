@@ -26,7 +26,7 @@ evaluate==0.4.3
 tqdm==4.67.1
 
 # Experiment Tracking
-tensorboard==2.18.0
+tensorboard==2.21.0
 
 # Jupyter Development
 jupyter==1.1.1
