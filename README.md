@@ -1,7 +1,8 @@
-# BERT vs TF-IDF Text Classification
+# Text Classification: TF-IDF vs BERT vs DeBERTa
 
-This project compares a TF-IDF logistic-regression baseline with a fine-tuned
-Transformer on the same deterministic IMDB train, validation, and test splits.
+This project compares a TF-IDF logistic-regression baseline with fine-tuned
+Transformers (DistilBERT / BERT and DeBERTa) on the same deterministic IMDB
+train, validation, and test splits.
 
 ## Setup
 
@@ -52,6 +53,26 @@ Use all available data by setting each size to zero:
 python main.py --model both --train-size 0 --validation-size 0 --test-size 0
 ```
 
+Compare BERT and DeBERTa on identical splits:
+
+```powershell
+python main.py --model bert-deberta --no-show-plots
+```
+
+Inspect DeBERTa's architecture before fine-tuning:
+
+```powershell
+python deberta_experiment.py --structure-only
+```
+
+Fine-tune DeBERTa alone:
+
+```powershell
+python deberta_experiment.py
+# or
+python main.py --model deberta --no-show-plots
+```
+
 For a quick BERT smoke test:
 
 ```powershell
@@ -64,6 +85,9 @@ BERT instead of the faster default DistilBERT:
 ```powershell
 python main.py --bert-model bert-base-uncased --batch-size 4
 ```
+
+Default DeBERTa checkpoint is `microsoft/deberta-v3-base`. Override with
+`--deberta-model`.
 
 ## Outputs
 

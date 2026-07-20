@@ -2,10 +2,13 @@
 
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
+
+MODEL_ORDER = ("tfidf", "bert", "deberta")
 
 
 def _annotate_bars(axis: Any, bars: Any, precision: int = 3) -> None:
@@ -85,7 +88,9 @@ def _plot_confusion_matrix(
     axis.figure.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
 
 
-def _plot_bert_history(axis: Any, result: dict[str, Any]) -> None:
+def _plot_learning_curves(
+    axis: Any, result: dict[str, Any], title: str
+) -> None:
     history = result["history"]
     epochs = [entry["epoch"] for entry in history]
     losses = [entry["training_loss"] for entry in history]
@@ -95,7 +100,7 @@ def _plot_bert_history(axis: Any, result: dict[str, Any]) -> None:
     axis.plot(epochs, losses, marker="o", label="Training loss")
     axis.plot(epochs, accuracy, marker="o", label="Validation accuracy")
     axis.plot(epochs, f1, marker="o", label="Validation macro F1")
-    axis.set_title("BERT learning curves")
+    axis.set_title(title)
     axis.set_xlabel("Epoch")
     axis.set_ylabel("Value")
     axis.set_xticks(epochs)
@@ -110,16 +115,18 @@ def create_result_dashboard(
     """Save a PNG dashboard and optionally display it in a window."""
     models = [
         (key, results[key])
-        for key in ("tfidf", "bert")
+        for key in MODEL_ORDER
         if key in results
     ]
     if not models:
         raise ValueError("No model results are available to visualize.")
 
-    panel_count = 3 + len(models)
-    bert_result = results.get("bert")
-    if bert_result and bert_result.get("history"):
-        panel_count += 1
+    history_models = [
+        (key, result)
+        for key, result in models
+        if result.get("history")
+    ]
+    panel_count = 3 + len(models) + len(history_models)
 
     columns = 3 if panel_count > 4 else 2
     rows = math.ceil(panel_count / columns)
@@ -152,8 +159,9 @@ def create_result_dashboard(
         _plot_confusion_matrix(panels[next_panel], result)
         next_panel += 1
 
-    if bert_result and bert_result.get("history"):
-        _plot_bert_history(panels[next_panel], bert_result)
+    for key, result in history_models:
+        title = f"{result['model']} learning curves"
+        _plot_learning_curves(panels[next_panel], result, title)
         next_panel += 1
 
     for unused_axis in panels[next_panel:]:
@@ -169,12 +177,103 @@ def create_result_dashboard(
         f"validation {formatted_sizes['validation']}, "
         f"test {formatted_sizes['test']}"
     )
+    model_names = " vs ".join(key.upper() for key, _ in models)
     figure.suptitle(
-        f"TF-IDF vs BERT experiment results\n{subtitle}",
+        f"{model_names} experiment results\n{subtitle}",
         fontsize=16,
         fontweight="bold",
     )
     figure.tight_layout(rect=(0, 0, 1, 0.93))
+
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, dpi=160, bbox_inches="tight")
+    if show:
+        plt.show()
+    plt.close(figure)
+    return path
+
+
+def _shorten_token(token: str, max_chars: int = 10) -> str:
+    cleaned = token.replace("Ġ", "▁").replace("##", "")
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[: max_chars - 1] + "…"
+
+
+def _plot_attention_matrix(
+    axis: Any,
+    attention: np.ndarray,
+    tokens: Sequence[str],
+    title: str,
+) -> None:
+    labels = [_shorten_token(token) for token in tokens]
+    sns.heatmap(
+        attention,
+        ax=axis,
+        cmap="viridis",
+        xticklabels=labels,
+        yticklabels=labels,
+        cbar=True,
+        square=True,
+        vmin=0.0,
+    )
+    axis.set_title(title, fontsize=11)
+    axis.set_xlabel("Key tokens")
+    axis.set_ylabel("Query tokens")
+    axis.tick_params(axis="x", labelrotation=90, labelsize=7)
+    axis.tick_params(axis="y", labelrotation=0, labelsize=7)
+
+
+def create_attention_heatmap(
+    panels: Sequence[dict[str, Any]],
+    output_path: str | Path,
+    sample_text: str,
+    true_label: str,
+    show: bool = True,
+) -> Path:
+    """Save side-by-side attention heatmaps for one sample.
+
+    Each panel dict should contain:
+    - model_label: display name
+    - tokens: list of token strings
+    - attention: 2-D array (query x key), usually mean over heads
+    - prediction: predicted class label string
+    - layer: layer index used for the heatmap
+    """
+    if not panels:
+        raise ValueError("At least one attention panel is required.")
+
+    columns = len(panels)
+    figure, axes = plt.subplots(
+        1,
+        columns,
+        figsize=(6.4 * columns, 5.8),
+        squeeze=False,
+    )
+
+    for index, panel in enumerate(panels):
+        prediction = panel["prediction"]
+        title = (
+            f"{panel['model_label']}  |  layer {panel['layer']}  |  "
+            f"pred={prediction}"
+        )
+        _plot_attention_matrix(
+            axes[0, index],
+            np.asarray(panel["attention"]),
+            panel["tokens"],
+            title,
+        )
+
+    preview = sample_text if len(sample_text) <= 180 else sample_text[:177] + "..."
+    figure.suptitle(
+        f"Attention heatmap on one validation sample (true={true_label})\n"
+        f"{preview}",
+        fontsize=12,
+        fontweight="bold",
+        wrap=True,
+    )
+    figure.tight_layout(rect=(0, 0, 1, 0.90))
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
